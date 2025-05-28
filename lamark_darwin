@@ -1,0 +1,265 @@
+import random
+import numpy as np
+import matplotlib.pyplot as plt
+
+#Core Genetic Algorithm Functions 
+
+def evaluate_fitness(individual, N):
+    """Lower fitness is better (0 = perfect solution)"""
+    square = np.array(individual).reshape(N, N)
+    target_sum = N * (N**2 + 1) // 2
+    fitness = 0
+
+    # Check rows
+    for row in square:
+        fitness += abs(sum(row) - target_sum)
+    # Check columns
+    for col in square.T:
+        fitness += abs(sum(col) - target_sum)
+    # Check main diagonal
+    fitness += abs(sum(square.diagonal()) - target_sum)
+    # Check anti-diagonal
+    fitness += abs(sum(np.fliplr(square).diagonal()) - target_sum)
+
+    return fitness
+
+def generate_initial_population(pop_size, N):
+    base = list(range(1, N * N + 1))
+    return [random.sample(base, len(base)) for _ in range(pop_size)]
+
+def crossover(parent1, parent2):
+    """Order crossover (OX)"""
+    size = len(parent1)
+    child = [None] * size
+    start, end = sorted(random.sample(range(size), 2))
+    
+    # Copy segment from parent1
+    child[start:end] = parent1[start:end]
+    
+    # Fill remaining positions with parent2's order
+    p2_idx = 0
+    for i in range(size):
+        if child[i] is None:
+            while parent2[p2_idx] in child:
+                p2_idx += 1
+            child[i] = parent2[p2_idx]
+    return child
+
+def mutate(individual, mutation_rate=0.2):
+    """Swap mutation"""
+    ind = individual[:]
+    num_swaps = int(len(ind) * mutation_rate)
+    for _ in range(num_swaps):
+        i, j = random.sample(range(len(ind)), 2)
+        ind[i], ind[j] = ind[j], ind[i]
+    return ind
+
+def local_optimization(individual, N, steps=None):
+    """Improved local optimization targeting constraint violations"""
+    if steps is None:
+        steps = N
+    
+    best = individual[:]
+    best_fitness = evaluate_fitness(best, N)
+    
+    for _ in range(steps):
+        # Try random swaps
+        candidate = best[:]
+        i, j = random.sample(range(len(candidate)), 2)
+        candidate[i], candidate[j] = candidate[j], candidate[i]
+        
+        candidate_fitness = evaluate_fitness(candidate, N)
+        if candidate_fitness < best_fitness:
+            best = candidate
+            best_fitness = candidate_fitness
+    
+    return best
+
+def tournament_selection(population, fitnesses, tournament_size=3):
+    """Tournament selection - lower fitness is better"""
+    tournament_indices = random.sample(range(len(population)), tournament_size)
+    best_idx = min(tournament_indices, key=lambda i: fitnesses[i])
+    return population[best_idx]
+
+# Main Experiment Runner 
+
+def run_experiment(N, mode="regular", population_size=100, generations=300):
+    fitness_call_counter = 0
+    best_fitness_over_time = []
+    average_fitness_over_time = []
+
+    def evaluate(ind):
+        nonlocal fitness_call_counter
+        fitness_call_counter += 1
+        return evaluate_fitness(ind, N)
+
+    # Initialize population
+    population = generate_initial_population(population_size, N)
+    best_solution = None
+
+    for gen in range(generations):
+        # Handle different evolution strategies
+        if mode == "regular":
+            # Regular GA - no local optimization
+            current_pop = population
+            fitnesses = [evaluate(ind) for ind in current_pop]
+        
+        elif mode == "darwin":
+            # Darwin: optimize for fitness evaluation, but breed from originals
+            optimized_pop = [local_optimization(ind, N, steps=N) for ind in population]
+            fitnesses = [evaluate(opt) for opt in optimized_pop]
+            current_pop = population  # Use original for breeding
+        
+        elif mode == "lamarck":
+            # Lamarck: optimize and use optimized versions for breeding
+            optimized_pop = [local_optimization(ind, N, steps=N) for ind in population]
+            fitnesses = [evaluate(opt) for opt in optimized_pop]
+            current_pop = optimized_pop  # Use optimized for breeding
+
+        # Track statistics
+        avg_fitness = sum(fitnesses) / len(fitnesses)
+        best_idx = np.argmin(fitnesses)
+        best_fitness = fitnesses[best_idx]
+        
+        best_fitness_over_time.append(best_fitness)
+        average_fitness_over_time.append(avg_fitness)
+
+        # Check for solution
+        if best_fitness == 0:
+            if mode == "lamarck":
+                best_solution = optimized_pop[best_idx]
+            else:
+                best_solution = current_pop[best_idx]
+            print(f"Solution found in generation {gen} with {mode} strategy!")
+            break
+
+        # Create next generation
+        new_population = []
+        
+        # Elitism - keep best individuals
+        elite_count = max(1, int(0.1 * population_size))
+        elite_indices = np.argsort(fitnesses)[:elite_count]
+        for idx in elite_indices:
+            new_population.append(current_pop[idx])
+
+        # Generate offspring
+        while len(new_population) < population_size:
+            parent1 = tournament_selection(current_pop, fitnesses)
+            parent2 = tournament_selection(current_pop, fitnesses)
+            child = crossover(parent1, parent2)
+            child = mutate(child, mutation_rate=0.1)
+            new_population.append(child)
+
+        population = new_population
+
+    return {
+        "found": best_solution is not None,
+        "fitness_calls": fitness_call_counter,
+        "best_fitness_over_time": best_fitness_over_time,
+        "avg_fitness_over_time": average_fitness_over_time,
+        "best_solution": best_solution
+    }
+
+# Utilities 
+
+def moving_average(data, window_size=10):
+    if len(data) < window_size:
+        return data
+    return np.convolve(data, np.ones(window_size)/window_size, mode='valid')
+
+def print_magic_square(solution, N):
+    """Print the magic square solution"""
+    if solution is None:
+        print("No solution found")
+        return
+    
+    square = np.array(solution).reshape(N, N)
+    print(f"\n{N}x{N} Magic Square:")
+    print(square)
+    
+    target_sum = N * (N**2 + 1) // 2
+    print(f"Target sum: {target_sum}")
+    
+    # Verify solution
+    print("\nVerification:")
+    print("Row sums:", [sum(row) for row in square])
+    print("Col sums:", [sum(col) for col in square.T])
+    print("Main diag sum:", sum(square.diagonal()))
+    print("Anti-diag sum:", sum(np.fliplr(square).diagonal()))
+
+# Running All Strategies
+
+def compare_strategies(N):
+    strategies = ["regular", "darwin", "lamarck"]
+    results = {}
+    colors = ['blue', 'orange', 'green']
+
+    print(f"Comparing strategies for {N}x{N} magic square...")
+    
+    for strategy in strategies:
+        print(f"\nRunning {strategy} strategy...")
+        results[strategy] = run_experiment(N=N, mode=strategy, 
+                                         population_size=150, 
+                                         generations=500)
+
+    # Create plots
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
+    
+    # Plot Best Fitness
+    for i, strategy in enumerate(strategies):
+        data = results[strategy]["best_fitness_over_time"]
+        smoothed = moving_average(data, window_size=20)
+        ax1.plot(range(len(smoothed)), smoothed, 
+                label=f"{strategy.capitalize()}", 
+                color=colors[i], linewidth=2)
+    
+    ax1.set_title("Best Fitness Over Generations", fontsize=14)
+    ax1.set_xlabel("Generation")
+    ax1.set_ylabel("Best Fitness (lower is better)")
+    ax1.legend()
+    ax1.grid(True, alpha=0.3)
+    
+    # Plot Average Fitness
+    for i, strategy in enumerate(strategies):
+        data = results[strategy]["avg_fitness_over_time"]
+        smoothed = moving_average(data, window_size=20)
+        ax2.plot(range(len(smoothed)), smoothed, 
+                label=f"{strategy.capitalize()}", 
+                color=colors[i], linewidth=2)
+    
+    ax2.set_title("Average Fitness Over Generations", fontsize=14)
+    ax2.set_xlabel("Generation")
+    ax2.set_ylabel("Average Fitness")
+    ax2.legend()
+    ax2.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    plt.show()
+
+    # Print summary
+    print("\n" + "="*60)
+    print("RESULTS SUMMARY")
+    print("="*60)
+    
+    for strategy in strategies:
+        r = results[strategy]
+        print(f"\n{strategy.upper()} Strategy:")
+        print(f"  • Solution found: {'YES' if r['found'] else 'NO'}")
+        print(f"  • Fitness evaluations: {r['fitness_calls']:,}")
+        print(f"  • Final best fitness: {r['best_fitness_over_time'][-1]}")
+        print(f"  • Final avg fitness: {r['avg_fitness_over_time'][-1]:.2f}")
+        
+        if r['found']:
+            print_magic_square(r['best_solution'], N)
+
+    return results
+
+# Main 
+
+if __name__ == "__main__":
+    # Test with different sizes
+    print("Testing Magic Square Generation with Different Evolution Strategies")
+    print("="*70)
+    
+    N = 4  # You can change this to 3, 5, etc.
+    results = compare_strategies(N=N)

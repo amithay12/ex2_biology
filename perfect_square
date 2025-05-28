@@ -1,0 +1,166 @@
+import random
+import numpy as np
+
+def generate_initial_population(size, N):
+    numbers = list(range(1, N*N + 1))
+    return [random.sample(numbers, N*N) for _ in range(size)]
+
+def evaluate_fitness(individual, N):
+    square = np.array(individual).reshape(N, N)
+    magic_sum = N * (N*N + 1) // 2
+    fitness = 0
+
+    for i in range(N):
+        fitness += abs(sum(square[i]) - magic_sum)
+        fitness += abs(sum(square[:, i]) - magic_sum)
+
+    fitness += abs(np.trace(square) - magic_sum)
+    fitness += abs(np.trace(np.fliplr(square)) - magic_sum)
+
+    for i in range(N - 1):
+        for j in range(N - 1):
+            block_sum = square[i][j] + square[i+1][j] + square[i][j+1] + square[i+1][j+1]
+            fitness += abs(block_sum - (4 * magic_sum // N))
+
+    for i in range(N):
+        for j in range(N):
+            mirror_i = N - 1 - i
+            mirror_j = N - 1 - j
+            if (i < mirror_i) or (i == mirror_i and j < mirror_j):
+                symmetric_sum = square[i][j] + square[mirror_i][mirror_j]
+                fitness += abs(symmetric_sum - (N*N + 1))
+
+    return fitness
+
+def individual_distance(ind1, ind2):
+    return sum(1 for a, b in zip(ind1, ind2) if a != b)
+
+def average_distance(individual, population):
+    return sum(individual_distance(individual, other) for other in population) / len(population)
+
+def crossover(parent1, parent2):
+    size = len(parent1)
+    start, end = sorted(random.sample(range(size), 2))
+    child = [-1]*size
+    child[start:end] = parent1[start:end]
+
+    ptr = 0
+    for i in range(size):
+        if parent2[i] not in child:
+            while child[ptr] != -1:
+                ptr += 1
+            child[ptr] = parent2[i]
+    return child
+
+def mutate(individual, mutation_rate=0.05):
+    if random.random() < mutation_rate:
+        i, j = random.sample(range(len(individual)), 2)
+        individual[i], individual[j] = individual[j], individual[i]
+    return individual
+
+def is_valid_magic_square(square, N):
+    magic_sum = N * (N*N + 1) // 2
+    rows = all(sum(row) == magic_sum for row in square)
+    cols = all(sum(square[:, i]) == magic_sum for i in range(N))
+    diags = np.trace(square) == magic_sum and np.trace(np.fliplr(square)) == magic_sum
+    return rows and cols and diags
+
+def combined_selection(population, fitnesses, diversity_scores, k=3):
+    selected = random.sample(list(zip(population, fitnesses, diversity_scores)), k)
+    weight = 0.3
+    selected.sort(key=lambda x: x[1] - weight * x[2])
+    return selected[0][0]
+
+def genetic_algorithm(N, population_size=100, generations=5000, stagnation_limit=500):
+    population = generate_initial_population(population_size, N)
+    best_fitness = float('inf')
+    last_improvement_gen = 0
+    mutation_rate = 0.4
+    best_individual = None
+
+    for generation in range(generations):
+        fitnesses = [evaluate_fitness(ind, N) for ind in population]
+        diversity_scores = [average_distance(ind, population) for ind in population]
+
+        pop_fit_div = sorted(zip(population, fitnesses, diversity_scores), key=lambda x: x[1])
+        population = [x[0] for x in pop_fit_div]
+        fitnesses = [x[1] for x in pop_fit_div]
+        diversity_scores = [x[2] for x in pop_fit_div]
+
+        current_best = population[0]
+        current_fitness = fitnesses[0]
+        current_diversity = diversity_scores[0]
+
+        if generation % 500 == 0:
+            print(f"Gen {generation}: Best fitness={current_fitness}, Diversity={current_diversity:.2f}, Mutation rate={mutation_rate:.3f}")
+
+        if current_fitness < best_fitness:
+            best_fitness = current_fitness
+            best_individual = current_best[:]
+            last_improvement_gen = generation
+            mutation_rate = 0.4  # reset mutation rate after improvement
+
+        if current_fitness == 0:
+            square = np.array(current_best).reshape(N, N)
+            if is_valid_magic_square(square, N):
+                return square
+
+        # ---------- Improved Stagnation Handling ----------
+        if generation - last_improvement_gen > stagnation_limit:
+            print(f"Stagnation at generation {generation}, injecting diversity and restarting search pressure...")
+
+            elite_count = int(0.05 * population_size)
+            elites = population[:elite_count]
+
+            # High-mutation hybrids from elites
+            hybrids = [mutate(elite[:], mutation_rate=0.3) for elite in elites]
+
+            # New random immigrants
+            immigrants = generate_initial_population(int(0.5 * population_size), N)
+
+            population = elites + hybrids + immigrants
+            mutation_rate = min(0.8, mutation_rate + 0.1)
+            random.shuffle(population)
+            last_improvement_gen = generation
+        # --------------------------------------------------
+
+        # ---------- New Population Generation ----------
+        elite_count = int(0.05 * population_size)
+        new_population = population[:elite_count]
+
+        # Occasionally inject random individuals
+        if generation % 50 == 0:
+            num_random = int(0.02 * population_size)
+            new_population.extend(generate_initial_population(num_random, N))
+
+        while len(new_population) < population_size:
+            p1 = combined_selection(population, fitnesses, diversity_scores)
+            p2 = combined_selection(population, fitnesses, diversity_scores)
+            child = crossover(p1, p2)
+            child = mutate(child, mutation_rate)
+            new_population.append(child)
+
+        population = new_population
+        # --------------------------------------------------
+
+    if best_individual:
+        square = np.array(best_individual).reshape(N, N)
+        if is_valid_magic_square(square, N):
+            return square
+        else:
+            print(f"Did not find perfect square. Best fitness: {best_fitness}")
+            return square
+    return None
+
+# ------------------ Entry Point ------------------
+if __name__ == "__main__":
+    try:
+        N = int(input("Enter a value for N (must be multiple of 4): "))
+        if N % 4 != 0 or N < 4:
+            print("Invalid input. N must be a multiple of 4 and at least 4.")
+        else:
+            result = genetic_algorithm(N)
+            print("Most Perfect Magic Square:")
+            print(result)
+    except ValueError:
+        print("Please enter a valid integer.")

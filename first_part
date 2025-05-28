@@ -1,0 +1,38 @@
+import numpy as np
+
+def generate_magic_square(n):
+    if n % 2 == 0 or n < 3:
+        raise ValueError("This method only works for odd n ≥ 3")
+
+    magic_square = np.zeros((n, n), dtype=int)
+
+    num = 1
+    i, j = 0, n // 2
+
+    while num <= n**2:
+        magic_square[i, j] = num
+        num += 1
+        newi, newj = (i - 1) % n, (j + 1) % n
+        if magic_square[newi, newj]:
+            i += 1
+        else:
+            i, j = newi, newj
+
+    return magic_square
+
+def main():
+    try:
+        n = int(input("Enter an odd number N (N ≥ 3): "))
+        if n % 2 == 0 or n < 3:
+            print("Error: N must be an odd number and at least 3.")
+            return
+        magic_square = generate_magic_square(n)
+        print(f"\nMagic Square (N={n}):")
+        print(magic_square)
+        magic_sum = n * (n**2 + 1) // 2
+        print("Magic Sum:", magic_sum)
+    except ValueError:
+        print("Invalid input. Please enter an odd integer greater than or equal to 3.")
+
+if __name__ == "__main__":
+    main()
